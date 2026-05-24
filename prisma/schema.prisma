@@ -1,0 +1,129 @@
+// Prisma Schema — 寻根溯源族谱管理系统
+// 数据库: PostgreSQL 16
+// 范式: 所有表满足 3NF / BCNF
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// 用户表
+// ─────────────────────────────────────────────
+model User {
+  id        String   @id @default(cuid())
+  username  String   @unique
+  email     String   @unique
+  password  String   // bcrypt hash
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // 关系
+  ownedGenealogies    Genealogy[]              @relation("GenealogyOwner")
+  collaborations      GenealogyCollaborator[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────
+// 族谱表
+// ─────────────────────────────────────────────
+model Genealogy {
+  id          String   @id @default(cuid())
+  name        String                     // 谱名
+  surname     String                     // 姓氏
+  createdYear Int      @map("created_year") // 修谱年份
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // 创建者 (FK → users)
+  ownerId  String @map("owner_id")
+  owner    User   @relation("GenealogyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // 关系
+  collaborators GenealogyCollaborator[]
+  members       Member[]
+
+  @@map("genealogies")
+}
+
+// ─────────────────────────────────────────────
+// 族谱协作者（M:N: Genealogy ↔ User）
+// ─────────────────────────────────────────────
+model GenealogyCollaborator {
+  genealogyId String   @map("genealogy_id")
+  userId      String   @map("user_id")
+  invitedAt   DateTime @default(now()) @map("invited_at")
+
+  genealogy Genealogy @relation(fields: [genealogyId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([genealogyId, userId])
+  @@map("genealogy_collaborators")
+}
+
+// ─────────────────────────────────────────────
+// 家族成员表
+// ─────────────────────────────────────────────
+model Member {
+  id          String  @id @default(cuid())
+  genealogyId String  @map("genealogy_id")
+  name        String
+  gender      String  // 'M' | 'F'
+  birthYear   Int?    @map("birth_year")
+  deathYear   Int?    @map("death_year")
+  bio         String? // 生平简介
+  generation  Int?    // 辈分（第几代，从1开始）
+
+  genealogy Genealogy @relation(fields: [genealogyId], references: [id], onDelete: Cascade)
+
+  // 作为子女的亲子关系
+  parentRelations ParentChild[] @relation("ChildRelation")
+  // 作为父母的亲子关系
+  childRelations  ParentChild[] @relation("ParentRelation")
+
+  // 婚姻关系（两侧）
+  marriagesAsP1 Marriage[] @relation("MarriageMember1")
+  marriagesAsP2 Marriage[] @relation("MarriageMember2")
+
+  @@index([genealogyId])
+  @@index([name])
+  @@map("members")
+}
+
+// ─────────────────────────────────────────────
+// 亲子血缘关系表（M:N self: Member ↔ Member）
+// CHECK: 父母出生年份 < 子女出生年份（应用层验证）
+// ─────────────────────────────────────────────
+model ParentChild {
+  parentId String @map("parent_id")
+  childId  String @map("child_id")
+
+  parent Member @relation("ParentRelation", fields: [parentId], references: [id], onDelete: Cascade)
+  child  Member @relation("ChildRelation", fields: [childId], references: [id], onDelete: Cascade)
+
+  @@id([parentId, childId])
+  @@index([parentId])
+  @@index([childId])
+  @@map("parent_child")
+}
+
+// ─────────────────────────────────────────────
+// 婚姻关系表（M:N self: Member ↔ Member）
+// ─────────────────────────────────────────────
+model Marriage {
+  id          String @id @default(cuid())
+  member1Id   String @map("member1_id")
+  member2Id   String @map("member2_id")
+  marriageYear Int?  @map("marriage_year")
+  divorceYear  Int?  @map("divorce_year")
+
+  member1 Member @relation("MarriageMember1", fields: [member1Id], references: [id], onDelete: Cascade)
+  member2 Member @relation("MarriageMember2", fields: [member2Id], references: [id], onDelete: Cascade)
+
+  @@index([member1Id])
+  @@index([member2Id])
+  @@map("marriages")
+}
